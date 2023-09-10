@@ -1,6 +1,14 @@
 build_lib(
   LIBNAME applications
   SOURCE_FILES
+    model/mpquic-bulk-send-application.cc
+    model/quic-client.cc
+    model/quic-server.cc
+    model/quic-echo-client.cc
+    model/quic-echo-server.cc
+    helper/mpquic-bulk-send-helper.cc
+    helper/quic-client-server-helper.cc
+    helper/quic-echo-helper.cc
     helper/bulk-send-helper.cc
     helper/on-off-helper.cc
     helper/packet-sink-helper.cc
@@ -25,6 +33,14 @@ build_lib(
     model/udp-server.cc
     model/udp-trace-client.cc
   HEADER_FILES
+    model/mpquic-bulk-send-application.h
+    model/quic-client.h
+    model/quic-server.h
+    model/quic-echo-client.h
+    model/quic-echo-server.h
+    helper/mpquic-bulk-send-helper.h
+    helper/quic-client-server-helper.h
+    helper/quic-echo-helper.h
     helper/bulk-send-helper.h
     helper/on-off-helper.h
     helper/packet-sink-helper.h
