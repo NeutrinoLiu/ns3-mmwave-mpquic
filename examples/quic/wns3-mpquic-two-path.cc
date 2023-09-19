@@ -88,7 +88,7 @@ main (int argc, char *argv[])
     int bVar = 2;
     int bLambda = 100;
     int mrate = 52428800;
-    int ccType = QuicSocketBase::OLIA;
+    int ccType = QuicSocketBase::QuicNewReno;
     int mselect = 3;
     int seed = 1;
     TypeId ccTypeId = MpQuicCongestionOps::GetTypeId ();
