@@ -17,8 +17,7 @@
  */
 
 #define RSEED 3091
-// #define TWO_PLMN
-#define USE_LOCAL_HOST
+#define TWO_PLMN
 
 #include "ns3/quic-module.h"
 #include "ns3/core-module.h"
@@ -376,12 +375,13 @@ main(int argc, char* argv[])
     LogComponentEnableAll (LOG_PREFIX_TIME);
     LogComponentEnableAll (LOG_PREFIX_FUNC);
     LogComponentEnableAll (LOG_PREFIX_NODE);
-    LogComponentEnable ("UdpSocket", LOG_LEVEL_LOGIC);
-    LogComponentEnable ("UdpSocketImpl", LOG_LEVEL_LOGIC);
-    LogComponentEnable ("UdpL4Protocol", LOG_LEVEL_LOGIC);
+    LogComponentEnable ("LteEnbRrc", LOG_LEVEL_DEBUG);
+    // LogComponentEnable ("UdpSocket", LOG_LEVEL_LOGIC);
+    // LogComponentEnable ("UdpSocketImpl", LOG_LEVEL_LOGIC);
+    // LogComponentEnable ("UdpL4Protocol", LOG_LEVEL_LOGIC);
     // LogComponentEnableAll (LOG_LEVEL_DEBUG);
-    // LogComponentEnable ("ThreeGppPropagationLossModel", LOG_LEVEL_DEBUG);
-    // LogComponentEnable ("BuildingsChannelConditionModel", LOG_LEVEL_DEBUG);
+    LogComponentEnable ("ThreeGppPropagationLossModel", LOG_LEVEL_DEBUG);
+    LogComponentEnable ("BuildingsChannelConditionModel", LOG_LEVEL_DEBUG);
     // LogComponentEnable ("MmWavePointToPointEpcHelper", LOG_LEVEL_DEBUG);
     LogComponentEnable ("MpquicTwoPlmn", LOG_LEVEL_ALL);
 
@@ -604,6 +604,21 @@ main(int argc, char* argv[])
 
     NS_LOG_UNCOND("config phase accomplished");
 
+    // MPQUIC
+    // create a single RemoteHost and a uenode
+    Ipv4StaticRoutingHelper ipv4RoutingHelper;
+    Ipv4AddressHelper ipv4h;
+    QuicHelper quicInternet;
+    NodeContainer remoteHostContainer;
+    remoteHostContainer.Create(1);
+    Ptr<Node> remoteHost = remoteHostContainer.Get(0);
+    quicInternet.InstallQuic(remoteHostContainer);
+    Ptr<Ipv4StaticRouting> remoteHostStaticRouting = ipv4RoutingHelper.GetStaticRouting(remoteHost->GetObject<Ipv4>());
+    NodeContainer ueNodes;
+    ueNodes.Create(1);
+    quicInternet.InstallQuic(ueNodes);
+    Ptr<Ipv4StaticRouting> ueStaticRouting = ipv4RoutingHelper.GetStaticRouting(ueNodes.Get(0)->GetObject<Ipv4>());
+
     Ptr<MmWaveHelper> mmwaveHelper = CreateObject<MmWaveHelper>();
     mmwaveHelper->SetPathlossModelType("ns3::ThreeGppUmiStreetCanyonPropagationLossModel");
     mmwaveHelper->SetChannelConditionModelType("ns3::BuildingsChannelConditionModel");
@@ -619,33 +634,56 @@ main(int argc, char* argv[])
     mmwaveHelper->SetHarqEnabled(harqEnabled);
     mmwaveHelper->Initialize();
 
+    NodeContainer mmWaveEnbNodes;
+    NodeContainer lteEnbNodes;
+    NodeContainer allEnbNodes;
+    mmWaveEnbNodes.Create(2);
+    lteEnbNodes.Create(1);
+    allEnbNodes.Add(lteEnbNodes);
+    allEnbNodes.Add(mmWaveEnbNodes);
+    // Positions
+    Vector mmw1Position = Vector(50, 70, 3);
+    Vector mmw2Position = Vector(150, 70, 3);
+
     NS_LOG_UNCOND("first mmwave instantited");
 
 #ifdef TWO_PLMN
-        // MPQUIC: duplicate on a second PLMN
-        Ptr<MmWaveHelper> mmwaveHelper_dup = CreateObject<MmWaveHelper>();
-        mmwaveHelper_dup->SetPathlossModelType("ns3::ThreeGppUmiStreetCanyonPropagationLossModel");
-        mmwaveHelper_dup->SetChannelConditionModelType("ns3::BuildingsChannelConditionModel");
-        mmwaveHelper_dup->SetUePhasedArrayModelAttribute("NumColumns", UintegerValue(4));
-        mmwaveHelper_dup->SetUePhasedArrayModelAttribute("NumRows", UintegerValue(4));
-        mmwaveHelper_dup->SetEnbPhasedArrayModelAttribute("NumColumns", UintegerValue(8));
-        mmwaveHelper_dup->SetEnbPhasedArrayModelAttribute("NumRows", UintegerValue(8));
-        Ptr<MmWavePointToPointEpcHelper> epcHelper_dup = CreateObject<MmWavePointToPointEpcHelper>(
-                                        "8.0.0.0",
-                                        "7778:f00d::",
-                                        "15.0.0.0",
-                                        "16.0.0.0",
-                                        "17.0.0.0"
-                                        );
-        mmwaveHelper_dup->SetEpcHelper(epcHelper_dup);
-        mmwaveHelper_dup->SetHarqEnabled(harqEnabled);
-        // mmwaveHelper_dup->SetAttribute("UeBaseAddress", StringValue("8.0.0.0"));
-        // mmwaveHelper_dup->SetAttribute("X2BaseAddress", StringValue("15.0.0.0"));
-        // mmwaveHelper_dup->SetAttribute("S1apBaseAddress", StringValue("16.0.0.0"));
-        // mmwaveHelper_dup->SetAttribute("S1uBaseAddress", StringValue("17.0.0.0"));
-        mmwaveHelper_dup->Initialize();
-        // 
-        NS_LOG_UNCOND("second mmwave instantited");
+    // MPQUIC: duplicate on a second PLMN
+    Ptr<MmWaveHelper> mmwaveHelper_dup = CreateObject<MmWaveHelper>();
+    mmwaveHelper_dup->SetPathlossModelType("ns3::ThreeGppUmiStreetCanyonPropagationLossModel");
+    mmwaveHelper_dup->SetChannelConditionModelType("ns3::BuildingsChannelConditionModel");
+    mmwaveHelper_dup->SetUePhasedArrayModelAttribute("NumColumns", UintegerValue(4));
+    mmwaveHelper_dup->SetUePhasedArrayModelAttribute("NumRows", UintegerValue(4));
+    mmwaveHelper_dup->SetEnbPhasedArrayModelAttribute("NumColumns", UintegerValue(8));
+    mmwaveHelper_dup->SetEnbPhasedArrayModelAttribute("NumRows", UintegerValue(8));
+    Ptr<MmWavePointToPointEpcHelper> epcHelper_dup = CreateObject<MmWavePointToPointEpcHelper>(
+                                    "8.0.0.0",
+                                    "7778:f00d::",
+                                    "15.0.0.0",
+                                    "16.0.0.0",
+                                    "17.0.0.0"
+                                    );
+    mmwaveHelper_dup->SetEpcHelper(epcHelper_dup);
+    mmwaveHelper_dup->SetHarqEnabled(harqEnabled);
+    // mmwaveHelper_dup->SetAttribute("UeBaseAddress", StringValue("8.0.0.0"));
+    // mmwaveHelper_dup->SetAttribute("X2BaseAddress", StringValue("15.0.0.0"));
+    // mmwaveHelper_dup->SetAttribute("S1apBaseAddress", StringValue("16.0.0.0"));
+    // mmwaveHelper_dup->SetAttribute("S1uBaseAddress", StringValue("17.0.0.0"));
+    mmwaveHelper_dup->Initialize();
+
+    NodeContainer mmWaveEnbNodes_dup;
+    NodeContainer lteEnbNodes_dup;
+    NodeContainer allEnbNodes_dup;
+    mmWaveEnbNodes_dup.Create(2);
+    lteEnbNodes_dup.Create(1);
+    allEnbNodes_dup.Add(lteEnbNodes_dup);
+    allEnbNodes_dup.Add(mmWaveEnbNodes_dup);
+    // Positions
+    Vector mmw1Position_dup = Vector(50, 10, 3);
+    Vector mmw2Position_dup = Vector(150, 10, 3);
+
+    NS_LOG_UNCOND("second mmwave instantited");
+
 #endif
 
     ConfigStore inputConfig;
@@ -654,34 +692,6 @@ main(int argc, char* argv[])
     // parse again so you can override default values from the command line
     cmd.Parse(argc, argv);
 
-    // create a single RemoteHost
-    Ipv4StaticRoutingHelper ipv4RoutingHelper;
-
-    NodeContainer remoteHostContainer;
-    remoteHostContainer.Create(1);
-    Ptr<Node> remoteHost = remoteHostContainer.Get(0);
-    // MPQUIC
-    InternetStackHelper internet;
-    QuicHelper quicInternet;
-    quicInternet.InstallQuic(remoteHostContainer);
-    Ptr<Ipv4StaticRouting> remoteHostStaticRouting = ipv4RoutingHelper.GetStaticRouting(remoteHost->GetObject<Ipv4>());
-
-    // create a single local host
-    NodeContainer localHostContainer;
-    localHostContainer.Create(1);
-    Ptr<Node> localHost = localHostContainer.Get(0);
-    // MPQUIC
-    quicInternet.InstallQuic(localHostContainer);
-    Ptr<Ipv4StaticRouting> localhostStaticRouting = ipv4RoutingHelper.GetStaticRouting(localHost->GetObject<Ipv4>());
-
-    NS_LOG_UNCOND("local/remote hosts instantited");
-    
-    const char local_p2p_addr[8] = "3.0.0.0";
-#ifdef TWO_PLMN
-    const char local_p2p_dup_addr[8] = "4.0.0.0";
-#endif
-
-
     // Get SGW/PGW
     Ptr<Node> pgw = epcHelper->GetPgwNode();
     // Create the Internet by connecting remoteHost to pgw. Setup routing too
@@ -689,9 +699,7 @@ main(int argc, char* argv[])
     p2ph.SetDeviceAttribute("DataRate", DataRateValue(DataRate("100Gb/s")));
     p2ph.SetDeviceAttribute("Mtu", UintegerValue(2500));
     p2ph.SetChannelAttribute("Delay", TimeValue(Seconds(0.010)));
-    NS_LOG_UNCOND("pgw node id " << pgw->GetId() << " remotehost id " << remoteHost->GetId());
     NetDeviceContainer internetDevices = p2ph.Install(pgw, remoteHost);
-    Ipv4AddressHelper ipv4h;
     ipv4h.SetBase("1.0.0.0", "255.0.0.0");
     Ipv4InterfaceContainer internetIpIfaces = ipv4h.Assign(internetDevices);
     // interface 0 is localhost, 1 is the p2p device
@@ -714,39 +722,7 @@ main(int argc, char* argv[])
     NS_LOG_UNCOND("remote host connect with second pgw");
 #endif
 
-    // create LTE, mmWave eNB nodes and UE node
-    NodeContainer ueNodes;
-    NodeContainer mmWaveEnbNodes;
-    NodeContainer lteEnbNodes;
-    NodeContainer allEnbNodes;
-    mmWaveEnbNodes.Create(2);
-    lteEnbNodes.Create(1);
-    ueNodes.Create(1);
-    allEnbNodes.Add(lteEnbNodes);
-    allEnbNodes.Add(mmWaveEnbNodes);
-    // Positions
-    Vector mmw1Position = Vector(50, 70, 3);
-    Vector mmw2Position = Vector(150, 70, 3);
-
-#ifdef TWO_PLMN
-    // MPQUIC: duplicate ue and basestations as well, but with different bs location
-    // create LTE, mmWave eNB nodes and UE node
-    NodeContainer ueNodes_dup;
-    NodeContainer mmWaveEnbNodes_dup;
-    NodeContainer lteEnbNodes_dup;
-    NodeContainer allEnbNodes_dup;
-    mmWaveEnbNodes_dup.Create(2);
-    lteEnbNodes_dup.Create(1);
-    ueNodes_dup.Create(1);
-    allEnbNodes_dup.Add(lteEnbNodes_dup);
-    allEnbNodes_dup.Add(mmWaveEnbNodes_dup);
-    // Positions
-    Vector mmw1Position_dup = Vector(50, 10, 3);
-    Vector mmw2Position_dup = Vector(150, 10, 3);
-    //
-#endif
-
-    // building
+{    // building
     std::vector<Ptr<Building>> buildingVector;
 
     double maxBuildingSize = 20;
@@ -808,20 +784,10 @@ main(int argc, char* argv[])
     enbmobility_dup.SetPositionAllocator(enbPositionAlloc_dup);
     enbmobility_dup.Install(allEnbNodes_dup);
     BuildingsHelper::Install(allEnbNodes_dup); 
-    MobilityHelper uemobility_dup;
-    Ptr<ListPositionAllocator> uePositionAlloc_dup = CreateObject<ListPositionAllocator>();
-    uePositionAlloc_dup->Add(Vector(ueInitialPosition, -5, 1.6));
-    uemobility_dup.SetMobilityModel("ns3::ConstantVelocityMobilityModel");
-    uemobility_dup.SetPositionAllocator(uePositionAlloc_dup);
-    uemobility_dup.Install(ueNodes_dup);
-    BuildingsHelper::Install(ueNodes_dup);
-    ueNodes_dup.Get(0)->GetObject<MobilityModel>()->SetPosition(Vector(ueInitialPosition, -5, 1.6));
-    ueNodes_dup.Get(0)->GetObject<ConstantVelocityMobilityModel>()->SetVelocity(Vector(ueSpeed, 0, 0));
-    //
 #endif
+}
 
     // Install mmWave, lte, mc Devices to the nodes
-    internet.Install(ueNodes);
     NetDeviceContainer lteEnbDevs = mmwaveHelper->InstallLteEnbDevice(lteEnbNodes);
     NetDeviceContainer mmWaveEnbDevs = mmwaveHelper->InstallEnbDevice(mmWaveEnbNodes);
     NetDeviceContainer mcUeDevs = mmwaveHelper->InstallMcUeDevice(ueNodes);
@@ -829,10 +795,11 @@ main(int argc, char* argv[])
     // Install the IP stack on the UEs // MPQUIC
     Ipv4InterfaceContainer ueIpIface;
     ueIpIface = epcHelper->AssignUeIpv4Address(NetDeviceContainer(mcUeDevs));
-    NS_LOG_UNCOND("ue_iface ip:" << ueIpIface.GetAddress(0) << " ue id:" << ueNodes.Get(0)->GetId());
+    NS_LOG_UNCOND("---\n" << "ue_iface ip:" << ueIpIface.GetAddress(0) << " ue id:" << ueNodes.Get(0)->GetId());
     NS_LOG_UNCOND("host ip:" << remoteHostAddr << " host id:" << remoteHost->GetId());
     NS_LOG_UNCOND("pgw ip:" << internetIpIfaces.GetAddress(0) << " pgw id:" << pgw->GetId());
-    NS_LOG_UNCOND("plmn gateway:" << epcHelper->GetUeDefaultGatewayAddress());
+    NS_LOG_UNCOND("mme id:" << epcHelper->GetMmeNode()->GetId());
+    NS_LOG_UNCOND("plmn gateway:" << epcHelper->GetUeDefaultGatewayAddress() << "\n---");
     // Assign IP address to UEs, and install applications
 
     // Add X2 interfaces
@@ -843,17 +810,17 @@ main(int argc, char* argv[])
 #ifdef TWO_PLMN
     // MPQUIC: connect dup ue, bs with epc
     // Install mmWave, lte, mc Devices to the nodes
-    internet.Install(ueNodes_dup);
     NetDeviceContainer lteEnbDevs_dup = mmwaveHelper_dup->InstallLteEnbDevice(lteEnbNodes_dup);
     NetDeviceContainer mmWaveEnbDevs_dup = mmwaveHelper_dup->InstallEnbDevice(mmWaveEnbNodes_dup);
-    NetDeviceContainer mcUeDevs_dup = mmwaveHelper_dup->InstallMcUeDevice(ueNodes_dup); 
+    NetDeviceContainer mcUeDevs_dup = mmwaveHelper_dup->InstallMcUeDevice(ueNodes); 
 
     Ipv4InterfaceContainer ueIpIface_dup = epcHelper_dup->AssignUeIpv4Address(NetDeviceContainer(mcUeDevs_dup));
 
-    NS_LOG_UNCOND("ue_iface_dup ip:" << ueIpIface_dup.GetAddress(0) << " ue_dup id:" << ueNodes_dup.Get(0)->GetId());
+    NS_LOG_UNCOND("---\n" << "ue_iface_dup ip:" << ueIpIface_dup.GetAddress(0) << " ue id:" << ueNodes.Get(0)->GetId());
     NS_LOG_UNCOND("host_dup ip:" << remoteHostAddr_dup << " host id:" << remoteHost->GetId());
     NS_LOG_UNCOND("pgw_dup ip:" << internetIpIfaces_dup.GetAddress(0) << " pgw_dup id:" << pgw_dup->GetId());
-    NS_LOG_UNCOND("plmn_dup gateway:" << epcHelper_dup->GetUeDefaultGatewayAddress());
+    NS_LOG_UNCOND("mme_dup id:" << epcHelper_dup->GetMmeNode()->GetId());
+    NS_LOG_UNCOND("plmn_dup gateway:" << epcHelper_dup->GetUeDefaultGatewayAddress() << "\n---");
     // Assign IP address to UEs, and install applications
     // Set the default gateway for the UE
 
@@ -865,41 +832,14 @@ main(int argc, char* argv[])
 #endif
 
     
-    // MPQUIC connect localhost with two ue
-    PointToPointHelper local_p2p;
-    local_p2p.SetDeviceAttribute("DataRate", DataRateValue(DataRate("100Gb/s")));
-    local_p2p.SetDeviceAttribute("Mtu", UintegerValue(2500));
-    local_p2p.SetChannelAttribute("Delay", TimeValue(Seconds(0.0)));
-    NetDeviceContainer local2ue1_devs = local_p2p.Install(localHost, ueNodes.Get(0)); // nic#1 for localhost, connect to uenode nic#2
-    ipv4h.SetBase(local_p2p_addr, "255.0.0.0");
-    Ipv4InterfaceContainer local2ue1_ifaces = ipv4h.Assign(local2ue1_devs);
-    Ipv4Address localHostAddr = local2ue1_ifaces.GetAddress(0);
-
-    Ptr<Ipv4StaticRouting> ueStaticRouting = ipv4RoutingHelper.GetStaticRouting(ueNodes.Get(0)->GetObject<Ipv4>());
-    ueStaticRouting->SetDefaultRoute(epcHelper->GetUeDefaultGatewayAddress(), 1); 
-    // ueStaticRouting->AddHostRouteTo(Ipv4Address("1.0.0.2"), epcHelper->GetUeDefaultGatewayAddress(), 1);
-    ueStaticRouting->AddHostRouteTo(localHostAddr, 2);
-    localhostStaticRouting->AddHostRouteTo(remoteHostAddr, local2ue1_ifaces.GetAddress(1), 1); // iface 1 is the ue1
-    // localhostStaticRouting->AddHostRouteTo(local2ue1_ifaces.GetAddress(1), 1); // iface 1 is the ue1
+    // MPQUIC routing
+    // ueStaticRouting->SetDefaultRoute(epcHelper->GetUeDefaultGatewayAddress(), 1); 
+    ueStaticRouting->AddHostRouteTo(remoteHostAddr, epcHelper->GetUeDefaultGatewayAddress(),  1);
     remoteHostStaticRouting->AddNetworkRouteTo(Ipv4Address("7.0.0.0"), Ipv4Mask("255.0.0.0"), 1);
 
 #ifdef TWO_PLMN
-    //duplicate
-    PointToPointHelper local_p2p_dup;
-    local_p2p_dup.SetDeviceAttribute("DataRate", DataRateValue(DataRate("100Gb/s")));
-    local_p2p_dup.SetDeviceAttribute("Mtu", UintegerValue(2500));
-    local_p2p_dup.SetChannelAttribute("Delay", TimeValue(Seconds(0.0)));
-    NetDeviceContainer local2ue2_devs = local_p2p_dup.Install(localHost, ueNodes_dup.Get(0)); // nic#2 for localhost, connect to uenode_dup nic#2
-    ipv4h.SetBase(local_p2p_dup_addr, "255.0.0.0");
-    Ipv4InterfaceContainer local2ue2_ifaces = ipv4h.Assign(local2ue2_devs);
-    Ipv4Address localHostAddr_dup = local2ue2_ifaces.GetAddress(0);
-
-    Ptr<Ipv4StaticRouting> ueStaticRouting_dup = ipv4RoutingHelper.GetStaticRouting(ueNodes_dup.Get(0)->GetObject<Ipv4>());
-    ueStaticRouting_dup->SetDefaultRoute(epcHelper_dup->GetUeDefaultGatewayAddress(), 1); 
-    // ueStaticRouting_dup->AddHostRouteTo(Ipv4Address("2.0.0.2"), epcHelper_dup->GetUeDefaultGatewayAddress(), 1);
-    ueStaticRouting_dup->AddHostRouteTo(localHostAddr_dup, 2);
-    localhostStaticRouting->AddHostRouteTo(remoteHostAddr_dup, local2ue2_ifaces.GetAddress(1), 2); // iface 2 is the ue1_dup
-    // localhostStaticRouting->AddHostRouteTo(local2ue2_ifaces.GetAddress(1), 2); // iface 2 is the ue1_dup
+    // ueStaticRouting->SetDefaultRoute(epcHelper_dup->GetUeDefaultGatewayAddress(), 1); 
+    ueStaticRouting->AddHostRouteTo(remoteHostAddr_dup, epcHelper_dup->GetUeDefaultGatewayAddress(), 2);
     remoteHostStaticRouting->AddNetworkRouteTo(Ipv4Address("8.0.0.0"), Ipv4Mask("255.0.0.0"), 2);
 #endif
 
@@ -914,18 +854,15 @@ main(int argc, char* argv[])
     // NS_LOG_UNCOND("mmwave 0 cell id: " << mmdev->GetCellId());
     // mmdev = mmWaveEnbNodes_dup.Get(0)->GetDevice(0)->GetObject<MmWaveEnbNetDevice>();
     // NS_LOG_UNCOND("mmwave_dup 0 cell id: " << mmdev->GetCellId());
-    NS_LOG_UNCOND("localHost Id: " << localHost->GetId());
-    NS_LOG_UNCOND("PLMN1 bs nodes: "    << allEnbNodes.Get(0)->GetId() << " " 
+    NS_LOG_UNCOND("---\n" << "PLMN1 bs nodes: "    << allEnbNodes.Get(0)->GetId() << " " 
                                         << allEnbNodes.Get(1)->GetId() << " " 
-                                        << allEnbNodes.Get(2)->GetId() << " " );
-    NS_LOG_UNCOND("ue mmwave device id: " << mcUeDevs.Get(0)->GetIfIndex());
-    NS_LOG_UNCOND("ue p2p2 device id: " << local2ue1_devs.Get(1)->GetIfIndex());
+                                        << allEnbNodes.Get(2)->GetId() << " ");
+    NS_LOG_UNCOND("ue mmwave device id: " << mcUeDevs.Get(0)->GetIfIndex() << "\n---");
 #ifdef TWO_PLMN
-    NS_LOG_UNCOND("PLMN2 bs nodes: "    << allEnbNodes_dup.Get(0)->GetId() << " " 
+    NS_LOG_UNCOND("---\n" << "PLMN2 bs nodes: "    << allEnbNodes_dup.Get(0)->GetId() << " " 
                                         << allEnbNodes_dup.Get(1)->GetId() << " " 
                                         << allEnbNodes_dup.Get(2)->GetId() << " " );
-    NS_LOG_UNCOND("ue_dup mmwave device id: " << mcUeDevs_dup.Get(0)->GetIfIndex());
-    NS_LOG_UNCOND("ue_dup p2p device id: " << local2ue2_devs.Get(1)->GetIfIndex());
+    NS_LOG_UNCOND("ue_dup mmwave device id: " << mcUeDevs_dup.Get(0)->GetIfIndex() << "\n---");
 #endif
     // APPLICATION PART
     // Install and start applications on UEs and remote host
@@ -945,12 +882,12 @@ main(int argc, char* argv[])
                         InetSocketAddress(remoteHostAddr, ulPort));
         // Set the amount of data to send in bytes.  Zero is unlimited.
         source.SetAttribute ("MaxBytes", UintegerValue (maxBytes));
-        clientApps = source.Install(localHost);
+        clientApps.Add(source.Install(ueNodes.Get(0)));
         // NS_LOG_UNCOND("source inited");
 
         PacketSinkHelper sink("ns3::QuicSocketFactory",
                                 InetSocketAddress(Ipv4Address::GetAny(), ulPort));
-        serverApps = sink.Install(remoteHost);
+        serverApps.Add(sink.Install(remoteHost));
         // NS_LOG_UNCOND("sink inited");
     }
     if (udp_dl)
@@ -996,16 +933,6 @@ main(int argc, char* argv[])
                         ueNodes.Get(0),
                         Vector(0, 0, 0)); // start UE movement after Seconds(0.5)
     // MPQUIC duplicate speedchange
-#ifdef TWO_PLMN
-    Simulator::Schedule(Seconds(transientDuration),
-                        &ChangeSpeed,
-                        ueNodes_dup.Get(0),
-                        Vector(ueSpeed, 0, 0)); // start UE movement after Seconds(0.5)
-    Simulator::Schedule(Seconds(simTime - 1),
-                        &ChangeSpeed,
-                        ueNodes_dup.Get(0),
-                        Vector(0, 0, 0)); // start UE movement after Seconds(0.5)
-#endif
 
     double numPrints = 0;
     for (int i = 0; i < numPrints; i++)
@@ -1013,7 +940,7 @@ main(int argc, char* argv[])
         Simulator::Schedule(Seconds(i * simTime / numPrints), &PrintPosition, ueNodes.Get(0));
     }
 
-    mmwaveHelper->EnableTraces();
+    // mmwaveHelper->EnableTraces();
 // #ifdef TWO_PLMN
 //     mmwaveHelper_dup->EnableTraces(); 
 // #endif
