@@ -68,6 +68,16 @@ namespace mmwave
 NS_OBJECT_ENSURE_REGISTERED(MmWavePointToPointEpcHelper);
 
 MmWavePointToPointEpcHelper::MmWavePointToPointEpcHelper()
+    : MmWavePointToPointEpcHelper(  "7.0.0.0",
+                                    "7777:f00d::",
+                                    "10.0.0.0",
+                                    "11.0.0.0",
+                                    "12.0.0.0") {}
+MmWavePointToPointEpcHelper::MmWavePointToPointEpcHelper(   const char* addrpgw,
+                                                            const char* addrpgw6,
+                                                            const char* addrs1u, 
+                                                            const char* addrs1ap,
+                                                            const char* addrx2)
     : m_gtpuUdpPort(2152),
       // fixed by the standard
       m_s1apUdpPort(36412)
@@ -77,15 +87,15 @@ MmWavePointToPointEpcHelper::MmWavePointToPointEpcHelper()
     // since we use point-to-point links for all S1-U and S1-AP links,
     // we use a /30 subnet which can hold exactly two addresses
     // (remember that net broadcast and null address are not valid)
-    m_s1uIpv4AddressHelper.SetBase("10.0.0.0", "255.255.255.252");
-    m_s1apIpv4AddressHelper.SetBase("11.0.0.0", "255.255.255.252");
-    m_x2Ipv4AddressHelper.SetBase("12.0.0.0", "255.255.255.252");
+    m_s1uIpv4AddressHelper.SetBase(addrs1u, "255.255.255.252");
+    m_s1apIpv4AddressHelper.SetBase(addrs1ap, "255.255.255.252");
+    m_x2Ipv4AddressHelper.SetBase(addrx2, "255.255.255.252");
 
     // we use a /8 net for all UEs
-    m_uePgwAddressHelper.SetBase("7.0.0.0", "255.0.0.0");
+    m_uePgwAddressHelper.SetBase(addrpgw, "255.0.0.0");
 
     // we use a /64 IPv6 net all UEs
-    m_uePgwAddressHelper6.SetBase("7777:f00d::", Ipv6Prefix(64));
+    m_uePgwAddressHelper6.SetBase(addrpgw6, Ipv6Prefix(64));
 
     // create SgwPgwNode
     m_sgwPgw = CreateObject<Node>();
@@ -104,7 +114,7 @@ MmWavePointToPointEpcHelper::MmWavePointToPointEpcHelper()
     Ipv6StaticRoutingHelper ipv6RoutingHelper;
     Ptr<Ipv6StaticRouting> pgwStaticRouting =
         ipv6RoutingHelper.GetStaticRouting(m_sgwPgw->GetObject<Ipv6>());
-    pgwStaticRouting->AddNetworkRouteTo("7777:f00d::", Ipv6Prefix(64), Ipv6Address("::"), 1, 0);
+    pgwStaticRouting->AddNetworkRouteTo(addrpgw6, Ipv6Prefix(64), Ipv6Address("::"), 1, 0);
 
     // create S1-U socket for SgwPgwNode
     Ptr<Socket> sgwPgwS1uSocket =

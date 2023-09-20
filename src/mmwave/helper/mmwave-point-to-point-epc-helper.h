@@ -76,6 +76,7 @@ class MmWavePointToPointEpcHelper : public EpcHelper
      * Constructor
      */
     MmWavePointToPointEpcHelper();
+    MmWavePointToPointEpcHelper(const char*, const char*, const char*, const char*, const char*);
 
     /**
      * Destructor
@@ -240,6 +241,7 @@ class MmWavePointToPointEpcHelper : public EpcHelper
      * because of some big X2 messages, you need a big MTU.
      */
     uint16_t m_x2LinkMtu;
+    std::string epc_ue_ip_space;
 };
 
 } // namespace mmwave

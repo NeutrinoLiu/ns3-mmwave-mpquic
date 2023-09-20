@@ -1,3 +1,7 @@
+working_space_output/
+examples-mmwave/
+output_mpquic/
+
 *.diff
 *.orig
 *.patch

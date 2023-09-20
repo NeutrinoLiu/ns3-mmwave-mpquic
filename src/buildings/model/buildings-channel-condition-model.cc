@@ -65,6 +65,9 @@ BuildingsChannelConditionModel::GetChannelCondition(Ptr<const MobilityModel> a,
     bool isAIndoor = a1->IsIndoor();
     bool isBIndoor = b1->IsIndoor();
 
+    NS_LOG_DEBUG("a is " << a << " " << a->IsInitialized());
+    NS_LOG_DEBUG("b is " << b << " " << b->IsInitialized());
+
     if (!isAIndoor && !isBIndoor) // a and b are outdoor
     {
         cond->SetO2iCondition(ChannelCondition::O2iConditionValue::O2O);
