@@ -16,26 +16,32 @@
  * Author: Michele Polese <michele.polese@gmail.com>
  */
 
-// #define QUIC
 #define RSEED 3091
+#define TWO_PLMN
+
 #include "ns3/quic-module.h"
+#include "ns3/core-module.h"
+#include "ns3/network-module.h"
+#include "ns3/internet-module.h"
+#include "ns3/point-to-point-helper.h"
 #include "ns3/applications-module.h"
+#include "ns3/config-store-module.h"
+#include "ns3/random-variable-stream.h"
+#include "ns3/flow-monitor-module.h"
+
 #include "ns3/buildings-helper.h"
 #include "ns3/buildings-module.h"
 #include "ns3/command-line.h"
-#include "ns3/config-store-module.h"
 #include "ns3/epc-helper.h"
 #include "ns3/global-value.h"
-#include "ns3/internet-module.h"
 #include "ns3/isotropic-antenna-model.h"
 #include "ns3/mmwave-helper.h"
 #include "ns3/mmwave-point-to-point-epc-helper.h"
 #include "ns3/mobility-module.h"
 #include "ns3/node-list.h"
-#include "ns3/point-to-point-helper.h"
-#include <ns3/lte-ue-net-device.h>
-#include <ns3/random-variable-stream.h>
+#include "ns3/lte-ue-net-device.h"
 #include "ns3/rng-seed-manager.h"
+
 
 
 #include <ctime>
@@ -55,7 +61,20 @@ using namespace mmwave;
  * between the UE and the eNBs.
  */
 
-NS_LOG_COMPONENT_DEFINE("McTwoEnbs");
+NS_LOG_COMPONENT_DEFINE("MpquicTwoPlmn");
+
+void ThroughputMonitor (FlowMonitorHelper *fmhelper, Ptr<FlowMonitor> flowMon, Ptr<OutputStreamWrapper> stream)
+{
+    std::map<FlowId, FlowMonitor::FlowStats> flowStats = flowMon->GetFlowStats();
+    Ptr<Ipv4FlowClassifier> classing = DynamicCast<Ipv4FlowClassifier> (fmhelper->GetClassifier());
+    for (std::map<FlowId, FlowMonitor::FlowStats>::const_iterator stats = flowStats.begin (); stats != flowStats.end (); ++stats)
+    {
+        if (stats->first == 1 || stats->first == 2){
+            *stream->GetStream () << stats->first  << "\t" << Simulator::Now().GetSeconds()/*->second.timeLastRxPacket.GetSeconds()*/ << "\t" << stats->second.rxBytes << "\t" << stats->second.rxPackets << "\t" << stats->second.lastDelay.GetMilliSeconds() << "\t" << stats->second.rxBytes*8/1024/1024/(stats->second.timeLastRxPacket.GetSeconds()-stats->second.timeFirstRxPacket.GetSeconds())  << std::endl;
+        }
+    }
+    Simulator::Schedule(Seconds(0.05),&ThroughputMonitor, fmhelper, flowMon, stream);
+}
 
 void
 PrintGnuplottableBuildingListToFile(std::string filename)
@@ -226,13 +245,13 @@ GenerateBuildingBounds(double xArea,
     xMinBuilding->SetAttribute("Min", DoubleValue(30));
     xMinBuilding->SetAttribute("Max", DoubleValue(xArea));
 
-    NS_LOG_UNCOND("min " << 0 << " max " << xArea);
+    // NS_LOG_UNCOND("min " << 0 << " max " << xArea);
 
     Ptr<UniformRandomVariable> yMinBuilding = CreateObject<UniformRandomVariable>();
     yMinBuilding->SetAttribute("Min", DoubleValue(0));
     yMinBuilding->SetAttribute("Max", DoubleValue(yArea));
 
-    NS_LOG_UNCOND("min " << 0 << " max " << yArea);
+    // NS_LOG_UNCOND("min " << 0 << " max " << yArea);
 
     Box box;
     uint32_t attempt = 0;
@@ -353,10 +372,25 @@ static ns3::GlobalValue g_lteUplink("lteUplink",
 int
 main(int argc, char* argv[])
 {
+    LogComponentEnableAll (LOG_PREFIX_TIME);
+    LogComponentEnableAll (LOG_PREFIX_FUNC);
+    LogComponentEnableAll (LOG_PREFIX_NODE);
+    LogComponentEnable ("LteEnbRrc", LOG_LEVEL_DEBUG);
+    LogComponentEnable ("MmWaveHelper", LOG_LEVEL_DEBUG);
+    // LogComponentEnable ("UdpSocket", LOG_LEVEL_LOGIC);
+    // LogComponentEnable ("UdpSocketImpl", LOG_LEVEL_LOGIC);
+    // LogComponentEnable ("UdpL4Protocol", LOG_LEVEL_LOGIC);
+    // LogComponentEnableAll (LOG_LEVEL_DEBUG);
+    // LogComponentEnable ("MmWaveEnbPhy", LOG_LEVEL_DEBUG);
+    // LogComponentEnable ("ThreeGppPropagationLossModel", LOG_LEVEL_DEBUG);
+    // LogComponentEnable ("ThreeGppChannelModel", LOG_LEVEL_DEBUG);
+    // LogComponentEnable ("BuildingsChannelConditionModel", LOG_LEVEL_DEBUG);
+    // LogComponentEnable ("MmWavePointToPointEpcHelper", LOG_LEVEL_DEBUG);
+    LogComponentEnable ("MpquicTwoPlmn", LOG_LEVEL_ALL);
+
     bool harqEnabled = true;
     bool fixedTti = false;
     RngSeedManager::SetSeed(RSEED);
-
     std::list<Box> m_previousBlocks;
 
     // Command line arguments
@@ -548,8 +582,7 @@ main(int argc, char* argv[])
     Config::SetDefault("ns3::PhasedArrayModel::AntennaElement",
                        PointerValue(CreateObject<IsotropicAntennaModel>()));
 
-
-    // quic config
+    // MPQUIC default config
     int ccType = QuicSocketBase::QuicNewReno;
     TypeId ccTypeId = QuicCongestionOps::GetTypeId();
     int schedulerType = MpQuicScheduler::ROUND_ROBIN;
@@ -570,8 +603,24 @@ main(int argc, char* argv[])
     // Config::SetDefault ("ns3::MpQuicScheduler::BlestLambda", UintegerValue(bLambda));     
     Config::SetDefault ("ns3::MpQuicScheduler::MabRate", UintegerValue(mrate)); 
     Config::SetDefault ("ns3::MpQuicScheduler::Select", UintegerValue(mselect)); 
-    //
+    // eof config
 
+    NS_LOG_UNCOND("config phase accomplished");
+
+    // MPQUIC
+    // create a single RemoteHost and a uenode
+    Ipv4StaticRoutingHelper ipv4RoutingHelper;
+    Ipv4AddressHelper ipv4h;
+    QuicHelper quicInternet;
+    NodeContainer remoteHostContainer;
+    remoteHostContainer.Create(1);
+    Ptr<Node> remoteHost = remoteHostContainer.Get(0);
+    quicInternet.InstallQuic(remoteHostContainer);
+    Ptr<Ipv4StaticRouting> remoteHostStaticRouting = ipv4RoutingHelper.GetStaticRouting(remoteHost->GetObject<Ipv4>());
+    NodeContainer ueNodes;
+    ueNodes.Create(1);
+    quicInternet.InstallQuic(ueNodes);
+    Ptr<Ipv4StaticRouting> ueStaticRouting = ipv4RoutingHelper.GetStaticRouting(ueNodes.Get(0)->GetObject<Ipv4>());
 
     Ptr<MmWaveHelper> mmwaveHelper = CreateObject<MmWaveHelper>();
     mmwaveHelper->SetPathlossModelType("ns3::ThreeGppUmiStreetCanyonPropagationLossModel");
@@ -588,56 +637,95 @@ main(int argc, char* argv[])
     mmwaveHelper->SetHarqEnabled(harqEnabled);
     mmwaveHelper->Initialize();
 
+    NodeContainer mmWaveEnbNodes;
+    NodeContainer lteEnbNodes;
+    NodeContainer allEnbNodes;
+    mmWaveEnbNodes.Create(2);
+    lteEnbNodes.Create(1);
+    allEnbNodes.Add(lteEnbNodes);
+    allEnbNodes.Add(mmWaveEnbNodes);
+    // Positions
+    Vector mmw1Position = Vector(50, 70, 3);
+    Vector mmw2Position = Vector(150, 70, 3);
+
+    NS_LOG_UNCOND("first mmwave instantited");
+
+#ifdef TWO_PLMN
+    // MPQUIC: duplicate on a second PLMN
+    Ptr<MmWaveHelper> mmwaveHelper_dup = CreateObject<MmWaveHelper>();
+    mmwaveHelper_dup->SetPathlossModelType("ns3::ThreeGppUmiStreetCanyonPropagationLossModel");
+    mmwaveHelper_dup->SetChannelConditionModelType("ns3::BuildingsChannelConditionModel");
+    mmwaveHelper_dup->SetUePhasedArrayModelAttribute("NumColumns", UintegerValue(4));
+    mmwaveHelper_dup->SetUePhasedArrayModelAttribute("NumRows", UintegerValue(4));
+    mmwaveHelper_dup->SetEnbPhasedArrayModelAttribute("NumColumns", UintegerValue(8));
+    mmwaveHelper_dup->SetEnbPhasedArrayModelAttribute("NumRows", UintegerValue(8));
+    Ptr<MmWavePointToPointEpcHelper> epcHelper_dup = CreateObject<MmWavePointToPointEpcHelper>(
+                                    "8.0.0.0",
+                                    "7778:f00d::",
+                                    "15.0.0.0",
+                                    "16.0.0.0",
+                                    "17.0.0.0"
+                                    );
+    mmwaveHelper_dup->SetEpcHelper(epcHelper_dup);
+    mmwaveHelper_dup->SetHarqEnabled(harqEnabled);
+    // mmwaveHelper_dup->SetAttribute("UeBaseAddress", StringValue("8.0.0.0"));
+    // mmwaveHelper_dup->SetAttribute("X2BaseAddress", StringValue("15.0.0.0"));
+    // mmwaveHelper_dup->SetAttribute("S1apBaseAddress", StringValue("16.0.0.0"));
+    // mmwaveHelper_dup->SetAttribute("S1uBaseAddress", StringValue("17.0.0.0"));
+    mmwaveHelper_dup->Initialize();
+
+    NodeContainer mmWaveEnbNodes_dup;
+    NodeContainer lteEnbNodes_dup;
+    NodeContainer allEnbNodes_dup;
+    mmWaveEnbNodes_dup.Create(2);
+    lteEnbNodes_dup.Create(1);
+    allEnbNodes_dup.Add(lteEnbNodes_dup);
+    allEnbNodes_dup.Add(mmWaveEnbNodes_dup);
+    // Positions
+    Vector mmw1Position_dup = Vector(50, 60, 3);
+    Vector mmw2Position_dup = Vector(150, 60, 3);
+
+    NS_LOG_UNCOND("second mmwave instantited");
+
+#endif
+
     ConfigStore inputConfig;
     inputConfig.ConfigureDefaults();
 
     // parse again so you can override default values from the command line
     cmd.Parse(argc, argv);
 
-    // Get SGW/PGW and create a single RemoteHost
+    // Get SGW/PGW
     Ptr<Node> pgw = epcHelper->GetPgwNode();
-    NodeContainer remoteHostContainer;
-    remoteHostContainer.Create(1);
-    Ptr<Node> remoteHost = remoteHostContainer.Get(0);
-    InternetStackHelper internet;
-    QuicHelper quicInternet;
-#ifdef QUIC
-    quicInternet.InstallQuic(remoteHostContainer);
-#else
-    internet.Install(remoteHostContainer);
-#endif
-
     // Create the Internet by connecting remoteHost to pgw. Setup routing too
     PointToPointHelper p2ph;
     p2ph.SetDeviceAttribute("DataRate", DataRateValue(DataRate("100Gb/s")));
     p2ph.SetDeviceAttribute("Mtu", UintegerValue(2500));
     p2ph.SetChannelAttribute("Delay", TimeValue(Seconds(0.010)));
     NetDeviceContainer internetDevices = p2ph.Install(pgw, remoteHost);
-    Ipv4AddressHelper ipv4h;
     ipv4h.SetBase("1.0.0.0", "255.0.0.0");
     Ipv4InterfaceContainer internetIpIfaces = ipv4h.Assign(internetDevices);
     // interface 0 is localhost, 1 is the p2p device
     Ipv4Address remoteHostAddr = internetIpIfaces.GetAddress(1);
-    Ipv4StaticRoutingHelper ipv4RoutingHelper;
-    Ptr<Ipv4StaticRouting> remoteHostStaticRouting =
-        ipv4RoutingHelper.GetStaticRouting(remoteHost->GetObject<Ipv4>());
-    remoteHostStaticRouting->AddNetworkRouteTo(Ipv4Address("7.0.0.0"), Ipv4Mask("255.0.0.0"), 1);
+    NS_LOG_UNCOND("remote host connect with first pgw");
 
-    // create LTE, mmWave eNB nodes and UE node
-    NodeContainer ueNodes;
-    NodeContainer mmWaveEnbNodes;
-    NodeContainer lteEnbNodes;
-    NodeContainer allEnbNodes;
-    mmWaveEnbNodes.Create(2);
-    lteEnbNodes.Create(1);
-    ueNodes.Create(1);
-    allEnbNodes.Add(lteEnbNodes);
-    allEnbNodes.Add(mmWaveEnbNodes);
+#ifdef TWO_PLMN
+    // MPQUIC: duplicate pgw
+    Ptr<Node> pgw_dup = epcHelper_dup->GetPgwNode();
+    // Create the Internet by connecting remoteHost to pgw. Setup routing too
+    PointToPointHelper p2ph_dup;
+    p2ph_dup.SetDeviceAttribute("DataRate", DataRateValue(DataRate("100Gb/s")));
+    p2ph_dup.SetDeviceAttribute("Mtu", UintegerValue(2500));
+    p2ph_dup.SetChannelAttribute("Delay", TimeValue(Seconds(0.010)));
+    NetDeviceContainer internetDevices_dup = p2ph_dup.Install(pgw_dup, remoteHost);
+    ipv4h.SetBase("2.0.0.0", "255.0.0.0");
+    Ipv4InterfaceContainer internetIpIfaces_dup = ipv4h.Assign(internetDevices_dup);
+    // interface 0 is localhost, 1 is the p2p device
+    Ipv4Address remoteHostAddr_dup = internetIpIfaces_dup.GetAddress(1);
+    NS_LOG_UNCOND("remote host connect with second pgw");
+#endif
 
-    // Positions
-    Vector mmw1Position = Vector(50, 70, 3);
-    Vector mmw2Position = Vector(150, 70, 3);
-
+{    // building
     std::vector<Ptr<Building>> buildingVector;
 
     double maxBuildingSize = 20;
@@ -664,11 +752,11 @@ main(int argc, char* argv[])
         building->SetBoundaries(Box(box.xMin, box.xMax, box.yMin, box.yMax, 0.0, buildingHeight));
         buildingVector.push_back(building);
     }
+    // eof building
+}
 
     // Install Mobility Model
     Ptr<ListPositionAllocator> enbPositionAlloc = CreateObject<ListPositionAllocator>();
-    // enbPositionAlloc->Add (Vector ((double)mmWaveDist/2 + streetWidth, mmw1Dist + 2*streetWidth,
-    // mmWaveZ));
     enbPositionAlloc->Add(mmw1Position); // LTE BS, out of area where buildings are deployed
     enbPositionAlloc->Add(mmw1Position);
     enbPositionAlloc->Add(mmw2Position);
@@ -680,106 +768,160 @@ main(int argc, char* argv[])
 
     MobilityHelper uemobility;
     Ptr<ListPositionAllocator> uePositionAlloc = CreateObject<ListPositionAllocator>();
-    // uePositionAlloc->Add (Vector (ueInitialPosition, -5, 0));
     uePositionAlloc->Add(Vector(ueInitialPosition, -5, 1.6));
     uemobility.SetMobilityModel("ns3::ConstantVelocityMobilityModel");
     uemobility.SetPositionAllocator(uePositionAlloc);
     uemobility.Install(ueNodes);
     BuildingsHelper::Install(ueNodes);
-
-    // ueNodes.Get (0)->GetObject<MobilityModel> ()->SetPosition (Vector (ueInitialPosition, -5,
-    // 0));
     ueNodes.Get(0)->GetObject<MobilityModel>()->SetPosition(Vector(ueInitialPosition, -5, 1.6));
     ueNodes.Get(0)->GetObject<ConstantVelocityMobilityModel>()->SetVelocity(Vector(ueSpeed, 0, 0));
 
-    // Install mmWave, lte, mc Devices to the nodes
-    NetDeviceContainer lteEnbDevs = mmwaveHelper->InstallLteEnbDevice(lteEnbNodes);
-    NetDeviceContainer mmWaveEnbDevs = mmwaveHelper->InstallEnbDevice(mmWaveEnbNodes);
-    NetDeviceContainer mcUeDevs;
-    mcUeDevs = mmwaveHelper->InstallMcUeDevice(ueNodes);
-
-    // Install the IP stack on the UEs
-#ifdef QUIC
-    quicInternet.InstallQuic(ueNodes);
-#else
-    internet.Install(ueNodes);
+#ifdef TWO_PLMN
+    // MPQUIC: duplicate mobility model
+    // Install Mobility Model
+    Ptr<ListPositionAllocator> enbPositionAlloc_dup = CreateObject<ListPositionAllocator>();
+    enbPositionAlloc_dup->Add(mmw1Position_dup); // LTE BS, out of area where buildings are deployed
+    enbPositionAlloc_dup->Add(mmw1Position_dup);
+    enbPositionAlloc_dup->Add(mmw2Position_dup);
+    MobilityHelper enbmobility_dup;
+    enbmobility_dup.SetMobilityModel("ns3::ConstantPositionMobilityModel");
+    enbmobility_dup.SetPositionAllocator(enbPositionAlloc_dup);
+    enbmobility_dup.Install(allEnbNodes_dup);
+    BuildingsHelper::Install(allEnbNodes_dup); 
 #endif
+
+
+    // Install mmWave, lte, mc Devices to the nodes
+    NetDeviceContainer lteEnbDevs = mmwaveHelper->InstallLteEnbDevice(lteEnbNodes, 10);
+    NetDeviceContainer mmWaveEnbDevs = mmwaveHelper->InstallEnbDevice(mmWaveEnbNodes);
+    NetDeviceContainer mcUeDevs = mmwaveHelper->InstallMcUeDevice(ueNodes, 10);
+
+    // Install the IP stack on the UEs // MPQUIC
     Ipv4InterfaceContainer ueIpIface;
     ueIpIface = epcHelper->AssignUeIpv4Address(NetDeviceContainer(mcUeDevs));
+    NS_LOG_UNCOND("---\n" << "ue_iface ip:" << ueIpIface.GetAddress(0) << " ue id:" << ueNodes.Get(0)->GetId()
+                            << " ue imsi:" << mcUeDevs.Get(0)->GetObject<McUeNetDevice>()->GetImsi());
+    NS_LOG_UNCOND("host ip:" << remoteHostAddr << " host id:" << remoteHost->GetId());
+    NS_LOG_UNCOND("pgw ip:" << internetIpIfaces.GetAddress(0) << " pgw id:" << pgw->GetId());
+    NS_LOG_UNCOND("mme id:" << epcHelper->GetMmeNode()->GetId());
+    NS_LOG_UNCOND("plmn gateway:" << epcHelper->GetUeDefaultGatewayAddress() << "\n---");
     // Assign IP address to UEs, and install applications
-    for (uint32_t u = 0; u < ueNodes.GetN(); ++u)
-    {
-        Ptr<Node> ueNode = ueNodes.Get(u);
-        // Set the default gateway for the UE
-        Ptr<Ipv4StaticRouting> ueStaticRouting =
-            ipv4RoutingHelper.GetStaticRouting(ueNode->GetObject<Ipv4>());
-        ueStaticRouting->SetDefaultRoute(epcHelper->GetUeDefaultGatewayAddress(), 1);
-    }
 
     // Add X2 interfaces
     mmwaveHelper->AddX2Interface(lteEnbNodes, mmWaveEnbNodes);
-
     // Manual attachment
     mmwaveHelper->AttachToClosestEnb(mcUeDevs, mmWaveEnbDevs, lteEnbDevs);
 
+#ifdef TWO_PLMN
+    // MPQUIC: connect dup ue, bs with epc
+    // Install mmWave, lte, mc Devices to the nodes
+    NetDeviceContainer lteEnbDevs_dup = mmwaveHelper_dup->InstallLteEnbDevice(lteEnbNodes_dup, 20);
+    NetDeviceContainer mmWaveEnbDevs_dup = mmwaveHelper_dup->InstallEnbDevice(mmWaveEnbNodes_dup);
+    NetDeviceContainer mcUeDevs_dup = mmwaveHelper_dup->InstallMcUeDevice(ueNodes, 20); 
+
+    Ipv4InterfaceContainer ueIpIface_dup = epcHelper_dup->AssignUeIpv4Address(NetDeviceContainer(mcUeDevs_dup));
+
+    NS_LOG_UNCOND("---\n" << "ue_iface_dup ip:" << ueIpIface_dup.GetAddress(0) << " ue id:" << ueNodes.Get(0)->GetId()
+                            << " ue imsi:" << mcUeDevs_dup.Get(0)->GetObject<McUeNetDevice>()->GetImsi());
+    NS_LOG_UNCOND("host_dup ip:" << remoteHostAddr_dup << " host id:" << remoteHost->GetId());
+    NS_LOG_UNCOND("pgw_dup ip:" << internetIpIfaces_dup.GetAddress(0) << " pgw_dup id:" << pgw_dup->GetId());
+    NS_LOG_UNCOND("mme_dup id:" << epcHelper_dup->GetMmeNode()->GetId());
+    NS_LOG_UNCOND("plmn_dup gateway:" << epcHelper_dup->GetUeDefaultGatewayAddress() << "\n---");
+    // Assign IP address to UEs, and install applications
+    // Set the default gateway for the UE
+
+    mmwaveHelper_dup->AddX2Interface(lteEnbNodes_dup, mmWaveEnbNodes_dup);
+    mmwaveHelper_dup->AttachToClosestEnb(mcUeDevs_dup, mmWaveEnbDevs_dup, lteEnbDevs_dup);
+    //
+    NS_LOG_UNCOND("ue and bs all attached");
+#endif
+
+    
+    // MPQUIC routing
+    // ueStaticRouting->SetDefaultRoute(epcHelper->GetUeDefaultGatewayAddress(), 1); 
+    ueStaticRouting->AddHostRouteTo(remoteHostAddr, epcHelper->GetUeDefaultGatewayAddress(),  1);
+    remoteHostStaticRouting->AddNetworkRouteTo(Ipv4Address("7.0.0.0"), Ipv4Mask("255.0.0.0"), 1);
+
+#ifdef TWO_PLMN
+    // ueStaticRouting->SetDefaultRoute(epcHelper_dup->GetUeDefaultGatewayAddress(), 1); 
+    ueStaticRouting->AddHostRouteTo(remoteHostAddr_dup, epcHelper_dup->GetUeDefaultGatewayAddress(), 2);
+    remoteHostStaticRouting->AddNetworkRouteTo(Ipv4Address("8.0.0.0"), Ipv4Mask("255.0.0.0"), 2);
+#endif
+
+    // NS_LOG_UNCOND("BEFORE");
+    // Ipv4GlobalRoutingHelper::PopulateRoutingTables (); // this is buggy
+    // NS_LOG_UNCOND("AFTER");
+
+
+    // print cell id
+    // Ptr<MmWaveEnbNetDevice> mmdev;
+    // mmdev = mmWaveEnbNodes.Get(0)->GetDevice(0)->GetObject<MmWaveEnbNetDevice>();
+    // NS_LOG_UNCOND("mmwave 0 cell id: " << mmdev->GetCellId());
+    // mmdev = mmWaveEnbNodes_dup.Get(0)->GetDevice(0)->GetObject<MmWaveEnbNetDevice>();
+    // NS_LOG_UNCOND("mmwave_dup 0 cell id: " << mmdev->GetCellId());
+    NS_LOG_UNCOND("---\n" << "PLMN1 bs nodes: "    << allEnbNodes.Get(0)->GetId() << " " 
+                                        << allEnbNodes.Get(1)->GetId() << " " 
+                                        << allEnbNodes.Get(2)->GetId() << " ");
+    NS_LOG_UNCOND("ue mmwave device id: " << mcUeDevs.Get(0)->GetIfIndex() << "\n---");
+#ifdef TWO_PLMN
+    NS_LOG_UNCOND("---\n" << "PLMN2 bs nodes: "    << allEnbNodes_dup.Get(0)->GetId() << " " 
+                                        << allEnbNodes_dup.Get(1)->GetId() << " " 
+                                        << allEnbNodes_dup.Get(2)->GetId() << " " );
+    NS_LOG_UNCOND("ue_dup mmwave device id: " << mcUeDevs_dup.Get(0)->GetIfIndex() << "\n---");
+#endif
+    // APPLICATION PART
     // Install and start applications on UEs and remote host
     uint16_t dlPort = 1234;
     uint16_t ulPort = 2000;
     ApplicationContainer clientApps;
     ApplicationContainer serverApps;
-#ifdef QUIC
-    bool dl = 0;
-    bool ul = 0;
+
+    bool udp_dl = 0;
+    bool udp_ul = 0;
     bool quic_up = 1;
-#else
-    bool dl = 1;
-    bool ul = 0;
-    bool quic_up = 0;
-#endif
+    int u = 0; // only the 0th ue 
 
-    for (uint32_t u = 0; u < ueNodes.GetN(); ++u)
-    {
-        if (quic_up) {
-            // NS_LOG_UNCOND("try quic upload");
-            MpquicBulkSendHelper source("ns3::QuicSocketFactory",
-                            InetSocketAddress(remoteHostAddr, ulPort));
-            // Set the amount of data to send in bytes.  Zero is unlimited.
-            source.SetAttribute ("MaxBytes", UintegerValue (maxBytes));
-            clientApps.Add(source.Install(ueNodes.Get(0)));
-            // NS_LOG_UNCOND("source inited");
+    if (quic_up) {
+        // NS_LOG_UNCOND("try quic upload");
+        MpquicBulkSendHelper source("ns3::QuicSocketFactory",
+                        InetSocketAddress(remoteHostAddr, ulPort));
+        // Set the amount of data to send in bytes.  Zero is unlimited.
+        source.SetAttribute ("MaxBytes", UintegerValue (maxBytes));
+        clientApps.Add(source.Install(ueNodes.Get(0)));
+        // NS_LOG_UNCOND("source inited");
 
-            PacketSinkHelper sink("ns3::QuicSocketFactory",
-                                    InetSocketAddress(Ipv4Address::GetAny(), ulPort));
-            serverApps.Add(sink.Install(remoteHost));
-            // NS_LOG_UNCOND("sink inited");
-        }
-        if (dl)
-        {
-            UdpServerHelper dlPacketSinkHelper(dlPort);
-            dlPacketSinkHelper.SetAttribute("PacketWindowSize", UintegerValue(256));
-            serverApps.Add(dlPacketSinkHelper.Install(ueNodes.Get(u)));
-
-            // Simulator::Schedule(MilliSeconds(20), &PrintLostUdpPackets,
-            // DynamicCast<UdpServer>(serverApps.Get(serverApps.GetN()-1)), lostFilename);
-
-            UdpClientHelper dlClient(ueIpIface.GetAddress(u), dlPort);
-            dlClient.SetAttribute("Interval", TimeValue(MicroSeconds(interPacketInterval)));
-            dlClient.SetAttribute("MaxPackets", UintegerValue(0xFFFFFFFF));
-            clientApps.Add(dlClient.Install(remoteHost));
-        }
-        if (ul)
-        {
-            ++ulPort;
-            PacketSinkHelper ulPacketSinkHelper("ns3::UdpSocketFactory",
-                                                InetSocketAddress(Ipv4Address::GetAny(), ulPort));
-            ulPacketSinkHelper.SetAttribute("PacketWindowSize", UintegerValue(256));
-            serverApps.Add(ulPacketSinkHelper.Install(remoteHost));
-            UdpClientHelper ulClient(remoteHostAddr, ulPort);
-            ulClient.SetAttribute("Interval", TimeValue(MicroSeconds(interPacketInterval)));
-            ulClient.SetAttribute("MaxPackets", UintegerValue(0xFFFFFFFF));
-            clientApps.Add(ulClient.Install(ueNodes.Get(u)));
-        }
+        PacketSinkHelper sink("ns3::QuicSocketFactory",
+                                InetSocketAddress(Ipv4Address::GetAny(), ulPort));
+        serverApps.Add(sink.Install(remoteHost));
+        // NS_LOG_UNCOND("sink inited");
     }
+    if (udp_dl)
+    {
+        UdpServerHelper dlPacketSinkHelper(dlPort);
+        dlPacketSinkHelper.SetAttribute("PacketWindowSize", UintegerValue(256));
+        serverApps.Add(dlPacketSinkHelper.Install(ueNodes.Get(u)));
+
+        // Simulator::Schedule(MilliSeconds(20), &PrintLostUdpPackets,
+        // DynamicCast<UdpServer>(serverApps.Get(serverApps.GetN()-1)), lostFilename);
+
+        UdpClientHelper dlClient(ueIpIface.GetAddress(u), dlPort);
+        dlClient.SetAttribute("Interval", TimeValue(MicroSeconds(interPacketInterval)));
+        dlClient.SetAttribute("MaxPackets", UintegerValue(0xFFFFFFFF));
+        clientApps.Add(dlClient.Install(remoteHost));
+    }
+    if (udp_ul)
+    {
+        ++ulPort;
+        PacketSinkHelper ulPacketSinkHelper("ns3::UdpSocketFactory",
+                                            InetSocketAddress(Ipv4Address::GetAny(), ulPort));
+        ulPacketSinkHelper.SetAttribute("PacketWindowSize", UintegerValue(256));
+        serverApps.Add(ulPacketSinkHelper.Install(remoteHost));
+        UdpClientHelper ulClient(remoteHostAddr, ulPort);
+        ulClient.SetAttribute("Interval", TimeValue(MicroSeconds(interPacketInterval)));
+        ulClient.SetAttribute("MaxPackets", UintegerValue(0xFFFFFFFF));
+        clientApps.Add(ulClient.Install(ueNodes.Get(u)));
+    }
+
 
     // Start applications
     NS_LOG_UNCOND("transientDuration " << transientDuration << " simTime " << simTime);
@@ -795,6 +937,7 @@ main(int argc, char* argv[])
                         &ChangeSpeed,
                         ueNodes.Get(0),
                         Vector(0, 0, 0)); // start UE movement after Seconds(0.5)
+    // MPQUIC duplicate speedchange
 
     double numPrints = 0;
     for (int i = 0; i < numPrints; i++)
@@ -802,21 +945,59 @@ main(int argc, char* argv[])
         Simulator::Schedule(Seconds(i * simTime / numPrints), &PrintPosition, ueNodes.Get(0));
     }
 
-    mmwaveHelper->EnableTraces();
+    // mmwaveHelper->EnableTraces();
+// #ifdef TWO_PLMN
+//     mmwaveHelper_dup->EnableTraces(); 
+// #endif
+    // how to trace dup??
+
 
     // set to true if you want to print the map of buildings, ues and enbs
-    bool print = false;
+    bool print = true;
     if (print)
     {
         PrintGnuplottableBuildingListToFile("buildings.txt");
         PrintGnuplottableUeListToFile("ues.txt");
         PrintGnuplottableEnbListToFile("enbs.txt");
     }
-    else
+
+
+
+    Simulator::Stop(Seconds(simTime));
+    NS_LOG_UNCOND("finish all setup");
+
+    // MPQUIC flowmonitor
+    AsciiTraceHelper asciiTraceHelper;
+    std::ostringstream fileName;
+    fileName <<  "./scheduler" << schedulerType << "-rx" << ".txt";
+    Ptr<OutputStreamWrapper> stream = asciiTraceHelper.CreateFileStream (fileName.str ());
+
+    FlowMonitorHelper flowmon;
+    Ptr<FlowMonitor> monitor = flowmon.InstallAll ();
+    ThroughputMonitor(&flowmon, monitor, stream); 
+    //
+    NS_LOG_UNCOND("START RUNNING SIM");
+    Simulator::Run();
+
+    // MPQUIC flowmonitor
+    monitor->CheckForLostPackets ();
+    Ptr<Ipv4FlowClassifier> classifier = DynamicCast<Ipv4FlowClassifier> (flowmon.GetClassifier ());
+    FlowMonitor::FlowStatsContainer stats = monitor->GetFlowStats ();
+
+    for (std::map<FlowId, FlowMonitor::FlowStats>::const_iterator i = stats.begin (); i != stats.end (); ++i)
     {
-        Simulator::Stop(Seconds(simTime));
-        Simulator::Run();
+        Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow (i->first);
+        if (i->first == 1 || i->first == 2){
+
+        NS_LOG_INFO("Flow " << i->first  << " (" << t.sourceAddress << " -> " << t.destinationAddress << ")"
+        << "\n Last rx Seconds: " << i->second.timeLastRxPacket.GetSeconds()
+        << "\n Rx Bytes: " << i->second.rxBytes
+        << "\n DelaySum(s): " << i->second.delaySum.GetSeconds()
+        << "\n rxPackets: " << i->second.rxPackets);
+        }
+        
     }
+    //
 
     Simulator::Destroy();
     return 0;
